@@ -1,37 +1,111 @@
-## Welcome to GitHub Pages
+# Projet OpenStack
 
-You can use the [editor on GitHub](https://github.com/antoine33520/openstack/edit/master/README.md) to maintain and preview the content for your website in Markdown files.
+Pour ma période de stage de l'année 2018 - 2019 un de mes objectifs est de réaliser et documenter une installation complète d'**OpenStack**.
+Cette page constitue donc la documentation à réaliser.
 
-Whenever you commit to this repository, GitHub Pages will run [Jekyll](https://jekyllrb.com/) to rebuild the pages in your site, from the content in your Markdown files.
+_Toute la documentation a été réalisé avec les droit `root`, toutes les commandes commençant `#` doivent être exécutées soit en utilisant la commande `sudo` (`man sudo` pour plus d'explication) soit depuis l'utilisateur `root`(méthode à éviter pour raison de sécurité)._
 
-### Markdown
+## 1) Topologie
 
-Markdown is a lightweight and easy-to-use syntax for styling your writing. It includes conventions for
+Cette installation va être réalisé sur 6 machines virtuelles. Une qui sera le controlleur, deux pour l'execution des instances, une pour le stockage de block et deux autre pour le stockage d'objets.
 
-```markdown
-Syntax highlighted code block
+|   Hostname   | RAM | vCPU | interface 1 |  interface 2   | Disque 1 | Disque 2 | Disque 3 |
+|:------------:|:---:|:----:|:-----------:|:--------------:|:--------:|:--------:|:--------:|
+| `controller` |  8  |  2   | 10.10.10.10 | 192.168.20.181 |    50    |          |          |
+|  `compute`   |  4  |  2   | 10.10.10.20 | 192.168.20.182 |    50    |          |          |
+|  `compute2`  |  4  |  2   | 10.10.10.22 | 192.168.20.183 |    50    |          |          |
+|  `storage1`  |  2  |  1   | 10.10.10.30 | 192.168.20.184 |    50    |   100    |          |
+|  `object1`   |  2  |  1   | 10.10.10.40 | 192.168.20.185 |    50    |    50    |    50    |
+|  `object2`   |  2  |  1   | 10.10.10.42 | 192.168.20.186 |    50    |    50    |    50    |
 
-# Header 1
-## Header 2
-### Header 3
+![Photo Topologie](./topo.svg)
 
-- Bulleted
-- List
+## 2) Installation
 
-1. Numbered
-2. List
+### 2.1) Serveur de temps
 
-**Bold** and _Italic_ and `Code` text
+Un des pré requis pour avoir un OpenStack fonctionnel est d'avoir des machines ayant la même heure et pour ça on va installer un serveur de temps (ntp) sur `controller` et définir les autres machines comme clients.
 
-[Link](url) and ![Image](src)
+Sur toutes les machines il faut installer le paquet `ntp` puis il faut remplacer dans `/etc/ntp.conf` `server 0.ubuntu.pool.ntp.org` par `server controller` sur toutes sauf le `controller` qui lui reste inchangé.
+
+```bash
+# sudo apt install ntp
 ```
 
-For more details see [GitHub Flavored Markdown](https://guides.github.com/features/mastering-markdown/).
+### 2.2) Installation des dépôts OpenStack
 
-### Jekyll Themes
+Sur toutes les machines il faut installer les dépôts OpenStack
 
-Your Pages site will use the layout and styles from the Jekyll theme you have selected in your [repository settings](https://github.com/antoine33520/openstack/settings). The name of this theme is saved in the Jekyll `_config.yml` configuration file.
+```bash
+# apt install software-properties-common
+# add-apt-repository cloud-archive:stein
+# apt update && apt dist-upgrade
+# apt install python-openstackclient
+```
 
-### Support or Contact
+### 2.3) Installation des BDD sur `controller`
 
-Having trouble with Pages? Check out our [documentation](https://help.github.com/categories/github-pages-basics/) or [contact support](https://github.com/contact) and we’ll help you sort it out.
+Maintenant il faut installer les bases de données sur `controller` qui seront nécessaire au bon fonctionnement de l'installation.
+
+On commence par le serveur `mariadb`
+
+```bash
+# apt install mariadb-server python-pymysql
+```
+
+On édite le fichier de configuration `/etc/mysql/conf.d/mysqld_openstack.cnf` pour y mettre :
+
+```conf
+[mysqld]
+## Set to Management IP
+bind-address = 10.10.10.10
+default-storage-engine = innodb
+innodb_file_per_table
+collation-server = utf8_general_ci
+init-connect = 'SET NAMES utf8'
+character-set-server = utf8
+```
+
+Puis on redémarre le service
+
+```bash
+# systemctl restart mysql
+```
+
+Ensuite on passe à installation de `mongodb`
+
+```bash
+# apt install mongodb-server mongodb-clients python-pymongo
+```
+
+Et on édit son fichier de configuration `/etc/mongodb.conf`
+
+```conf
+dbpath=/var/lib/mongodb
+logpath=/var/log/mongodb/mongodb.log
+logappend=true
+bind_ip = 10.10.10.10
+journal=true
+smallfiles = true
+```
+
+On redémarre le service
+
+```bash
+# systemctl restart mongodb
+```
+
+Ensuite on finit par l'installation de RabbitMQ
+
+```bash
+# apt-get install rabbitmq-server
+```
+
+Et on ajoute l’utilisateur openstack et on positionne ses droits:
+
+```bash
+# rabbitmqctl add_user openstack MOT_DE_PASSE
+# rabbitmqctl set_permissions openstack ".*" ".*" ".*"
+```
+
+### 2.4) Installation de `memcached`
