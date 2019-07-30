@@ -787,8 +787,172 @@ Pour terminer l'installation il faut redémarrer les services :
 # service nova-novncproxy restart
 ```
 
-#### 2.5.1) Partie sur `compute` et `compute2`
+#### 2.5.2) Partie sur `compute` et `compute2`
+
+#### 2.5.2.1) Installation du composant
 
 Cette partie doit être réalisée sur toutes les machines étant destinées au rôle compute.
 
+Installation du paquet :
+
+```bash
+# apt install nova-compute
+```
+
+Il faut éditer le fichier `/etc/nova/nova.conf` :
+
+* Dans la section [DEFAULT], on configure RabbitMQ
+
+```conf
+[DEFAULT]
+# ...
+transport_url = rabbit://openstack:RABBIT_PASS@controller
+```
+
+* Dans les sections [api] et [keystone_authtoken], on configure l'accès au service d'identité
+
+```conf
+[api]
+# ...
+auth_strategy = keystone
+
+[keystone_authtoken]
+# ...
+auth_url = http://controller:5000/v3
+memcached_servers = controller:11211
+auth_type = password
+project_domain_name = Default
+user_domain_name = Default
+project_name = service
+username = nova
+password = NOVA_PASS
+```
+
+* A nouveau dans la section [DEFAULT], on configure l'adresse ip :
+
+```conf
+[DEFAULT]
+# ...
+my_ip = MANAGEMENT_INTERFACE_IP_ADDRESS
+```
+
+* Toujours dans la section [DEFAULT], on configure le support du réseau :
+
+```conf
+[DEFAULT]
+# ...
+use_neutron = true
+firewall_driver = nova.virt.firewall.NoopFirewallDriver
+```
+
+* Dans la section [neutron], on configure la connexion au service neutron qu'on mettra en place par la suite :
+
+```conf
+[neutron]
+# ...
+url = http://controller:9696
+auth_url = http://controller:5000
+auth_type = password
+project_domain_name = default
+user_domain_name = default
+region_name = RegionOne
+project_name = service
+username = neutron
+password = NEUTRON_PASS
+```
+
+* Dans la section [vnc], on configure l'accès vnc à distance :
+
+```conf
+[vnc]
+# ...
+enabled = true
+server_listen = 0.0.0.0
+server_proxyclient_address = $my_ip
+novncproxy_base_url = http://controller:6080/vnc_auto.html
+```
+
+* Dans la section [glance], on configure l'accès à l'api glance :
+
+```conf
+[glance]
+# ...
+api_servers = http://controller:9292
+```
+
+* Dans la section [oslo_concurrency], on configure le lock_path :
+
+```conf
+[oslo_concurrency]
+# ...
+lock_path = /var/lib/nova/tmp
+```
+
+* Dans la section [placement], on configure l'accès à l'api de Placement :
+
+```conf
+[placement]
+# ...
+region_name = RegionOne
+project_domain_name = Default
+project_name = service
+auth_type = password
+user_domain_name = Default
+auth_url = http://controller:5000/v3
+username = placement
+password = PLACEMENT_PASS
+```
+
+#### 2.5.2.2) Finalisation de l'installation
+
+Il faut vérifier si la/les machine(s) peuvent utiliser l'accélération processeur pour la virtualisation :
+
+```bash
+# egrep -c '(vmx|svm)' /proc/cpuinfo
+```
+
+**ATTENTION** si le résultat est différent de `0` l'étape suivante n'est pas nécessaire et pourrait ralentir l'exécution des instances.
+Si le résultat de la commande précédente est `0` il faut modifier le fichier `/etc/nova/nova-compute.conf` :
+
+* Dans la section [libvirt]
+
+```conf
+[libvirt]
+# ...
+virt_type = qemu
+```
+
+Il faut ensuite redémarrer le service :
+
+```bash
+service nova-compute restart
+```
+
+#### 2.5.3) A nouveau `controller`
+
+#### 2.5.3.1) Ajout des `compute`
+
+Il faut maintenant ajouter les machines dans la base de données :
+
+```bash
+$ . admin-openrc
+
+# su -s /bin/sh -c "nova-manage cell_v2 discover_hosts --verbose" nova
+Found 2 cell mappings.
+Skipping cell0 since it does not contain hosts.
+Getting computes from cell 'cell1': f741e0b3-b740-45a4-823f-a9fbbb4e6e81
+Checking host mapping for compute host 'compute': 260ba75d-2c7e-40c1-b2fa-01cecb501d3a
+Creating host mapping for compute host 'compute': 260ba75d-2c7e-40c1-b2fa-01cecb501d3a
+Checking host mapping for compute host 'compute2': 1918c90d-93e0-416b-a724-2393f4b2d348
+Creating host mapping for compute host 'compute2': 1918c90d-93e0-416b-a724-2393f4b2d348
+Found 2 unmapped computes in cell: f741e0b3-b740-45a4-823f-a9fbbb4e6e81
+
+```
+
+### 2.6) Installation de Neutron
+
+Neutron est le service qui s'occupe de la gestion de la partie réseau d'openstack.
+2 options sont disponibles pour la configuration réseau d'OpenStack, ici j'utiliserai la première, pour plus d'information rapportez-vous à la [documentattion officielle](https://docs.openstack.org/neutron/stein/install/overview.html).
+
+#### 2.6.1) Partie sur `controller`
 
