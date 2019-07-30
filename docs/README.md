@@ -88,7 +88,7 @@ Ensuite on install RabbitMQ
 Et on ajoute l’utilisateur openstack et on positionne ses droits:
 
 ```bash
-# rabbitmqctl add_user openstack MOT_DE_PASSE
+# rabbitmqctl add_user openstack RABBIT_PASS
 # rabbitmqctl set_permissions openstack ".*" ".*" ".*"
 ```
 
@@ -307,3 +307,488 @@ $ openstack token issue
 ### 2.3) Installation de Glance sur `controller`
 
 L'étape suivante est l'installation du service d'image (Glance) sur `controller`.
+
+#### 2.3.1) Pré requis
+
+##### 2.3.1.1) Préparation de la base de données
+
+Il faut commencer par créer la base de données :
+
+```bash
+# mysql
+```
+
+```mysql
+MariaDB [(none)]> CREATE DATABASE glance;
+MariaDB [(none)]> GRANT ALL PRIVILEGES ON glance.* TO 'glance'@'localhost' \
+  IDENTIFIED BY 'GLANCE_DBPASS';
+MariaDB [(none)]> GRANT ALL PRIVILEGES ON glance.* TO 'glance'@'%' \
+  IDENTIFIED BY 'GLANCE_DBPASS';
+```
+
+##### 2.3.1.2) Création du compte pour le service
+
+Ensuite on se connect avec les droits administrateurs à l'aide du script.
+
+```bash
+$ . admin-openrc
+```
+
+Création de l'utilisateur :
+
+```bash
+$ openstack user create --domain default --password-prompt glance
+```
+
+Ajout du rôle administrateur à l'utilisateur glance et projet service :
+
+```bash
+$ openstack role add --project service --user glance admin
+```
+
+Création du service :
+
+```bash
+$ openstack service create --name glance \
+  --description "OpenStack Image" image
+```
+
+##### 2.3.1.3) création des points de terminaison de l'API
+
+```bash
+$ openstack endpoint create --region RegionOne \
+  image public http://controller:9292
+$ openstack endpoint create --region RegionOne \
+  image internal http://controller:9292
+$ openstack endpoint create --region RegionOne \
+  image admin http://controller:9292
+```
+
+#### 2.3.2) Installation et configuration du composant
+
+Installation du paquet :
+
+```bash
+# apt install glance
+```
+
+Ensuite il faut éditer le fichier `/etc/glance/glance-api.conf` :
+
+* Dans la section [database], on configure la connexion à la BDD :
+
+```conf
+[database]
+# ...
+connection = mysql+pymysql://glance:GLANCE_DBPASS@controller/glance
+```
+
+* Et dans les sections [keystone_authtoken] et [paste_deploy], on configure l'accès au service d'identité :
+
+```conf
+[keystone_authtoken]
+# ...
+www_authenticate_uri = http://controller:5000
+auth_url = http://controller:5000
+memcached_servers = controller:11211
+auth_type = password
+project_domain_name = Default
+user_domain_name = Default
+project_name = service
+username = glance
+password = GLANCE_PASS
+
+[paste_deploy]
+# ...
+flavor = keystone
+```
+
+* Enfin dans la section [glance_store], on configure le stockage des fichiers d'image :
+
+```conf
+[glance_store]
+# ...
+stores = file,http
+default_store = file
+filesystem_store_datadir = /var/lib/glance/images/
+```
+
+Il faut également modifier le fichier `/etc/glance/glance-registry.conf` :
+
+* Dans la section [database], on configure l'accès à la BDD :
+
+```conf
+[database]
+# ...
+connection = mysql+pymysql://glance:GLANCE_DBPASS@controller/glance
+```
+
+* Et dans les sections [keystone_authtoken] et [paste_deploy], on configure l'accès au service d'identité :
+
+```conf
+[keystone_authtoken]
+# ...
+www_authenticate_uri = http://controller:5000
+auth_url = http://controller:5000
+memcached_servers = controller:11211
+auth_type = password
+project_domain_name = Default
+user_domain_name = Default
+project_name = service
+username = glance
+password = GLANCE_PASS
+
+[paste_deploy]
+# ...
+flavor = keystone
+```
+
+Après il faut initialiser la BDD :
+
+```bash
+# su -s /bin/sh -c "glance-manage db_sync" glance
+```
+
+#### 2.3.3) Finalisation de l'installation
+
+```bash
+# service glance-registry restart
+# service glance-api restart
+```
+
+### 2.4 Installation de Placement sur `controller`
+
+#### 2.4.1) Pré requis
+
+##### 2.4.1.1) Préparation de la base de données
+
+Il faut commencer par créer la base de données :
+
+```bash
+# mysql
+```
+
+```mysql
+MariaDB [(none)]> CREATE DATABASE placement;
+MariaDB [(none)]> GRANT ALL PRIVILEGES ON glance.* TO 'placement'@'localhost' \
+  IDENTIFIED BY 'PLACEMENT_DBPASS';
+MariaDB [(none)]> GRANT ALL PRIVILEGES ON glance.* TO 'placement'@'%' \
+  IDENTIFIED BY 'PLACEMENT_DBPASS';
+```
+
+##### 2.4.1.2) Création du compte pour le service
+
+Ensuite on se connect avec les droits administrateurs à l'aide du script.
+
+```bash
+$ . admin-openrc
+```
+
+Création de l'utilisateur :
+
+```bash
+$ openstack user create --domain default --password-prompt placement
+```
+
+Ajout du rôle administrateur à l'utilisateur glance et projet service :
+
+```bash
+$ openstack role add --project service --user placement admin
+```
+
+Création du service :
+
+```bash
+$ openstack service create --name placement \
+  --description "Placement API" placement
+```
+
+##### 2.4.1.3) création des points de terminaison de l'API
+
+```bash
+$ openstack endpoint create --region RegionOne \
+  placement public http://controller:8778
+$ openstack endpoint create --region RegionOne \
+  placement internal http://controller:8778
+$ openstack endpoint create --region RegionOne \
+  placement admin http://controller:8778
+```
+
+#### 2.4.2) Installation et configuration du composant
+
+Installation du paquet :
+
+```bash
+# apt install placement-api
+```
+
+Ensuite on édit le fichier `/etc/placement/placement.conf` :
+
+* Dans la section [placement_database], on configure la connexion à la BDD :
+
+```conf
+[placement_database]
+# ...
+connection = mysql+pymysql://placement:PLACEMENT_DBPASS@controller/placement
+```
+
+* Et dans les sections [api] et [keystone_authtoken], la connexion au service d'identité :
+
+```conf
+[api]
+# ...
+auth_strategy = keystone
+
+[keystone_authtoken]
+# ...
+auth_url = http://controller:5000/v3
+memcached_servers = controller:11211
+auth_type = password
+project_domain_name = default
+user_domain_name = default
+project_name = service
+username = placement
+password = PLACEMENT_PASS
+```
+
+Il faut après initialiser la base de données :
+
+```bash
+# su -s /bin/sh -c "placement-manage db sync" placement
+```
+
+#### 2.4.3) Finalisation de l'installation
+
+```bash
+# service apache2 restart
+```
+
+### 2.5) Installation de Nova
+
+#### 2.5.1) Partie sur `controller`
+
+##### 2.5.1.1) Pré requis
+
+###### 2.5.1.1.1) Préparation de la base de données
+
+Il faut commencer par créer la base de données :
+
+```bash
+# mysql
+```
+
+```mysql
+MariaDB [(none)]> CREATE DATABASE nova_api;
+MariaDB [(none)]> CREATE DATABASE nova;
+MariaDB [(none)]> CREATE DATABASE nova_cell0;
+
+MariaDB [(none)]> GRANT ALL PRIVILEGES ON nova_api.* TO 'nova'@'localhost' \
+  IDENTIFIED BY 'NOVA_DBPASS';
+MariaDB [(none)]> GRANT ALL PRIVILEGES ON nova_api.* TO 'nova'@'%' \
+  IDENTIFIED BY 'NOVA_DBPASS';
+
+MariaDB [(none)]> GRANT ALL PRIVILEGES ON nova.* TO 'nova'@'localhost' \
+  IDENTIFIED BY 'NOVA_DBPASS';
+MariaDB [(none)]> GRANT ALL PRIVILEGES ON nova.* TO 'nova'@'%' \
+  IDENTIFIED BY 'NOVA_DBPASS';
+
+MariaDB [(none)]> GRANT ALL PRIVILEGES ON nova_cell0.* TO 'nova'@'localhost' \
+  IDENTIFIED BY 'NOVA_DBPASS';
+MariaDB [(none)]> GRANT ALL PRIVILEGES ON nova_cell0.* TO 'nova'@'%' \
+  IDENTIFIED BY 'NOVA_DBPASS';
+```
+
+##### 2.5.1.1.2) Création du compte pour le service
+
+Ensuite on se connect avec les droits administrateurs à l'aide du script.
+
+```bash
+$ . admin-openrc
+```
+
+Création de l'utilisateur :
+
+```bash
+$ openstack user create --domain default --password-prompt nova
+```
+
+Ajout du rôle administrateur à l'utilisateur glance et projet service :
+
+```bash
+$ openstack role add --project service --user nova admin
+```
+
+Création du service :
+
+```bash
+$ openstack service create --name nova \
+  --description "OpenStack Compute" compute
+```
+
+##### 2.5.1.1.3) création des points de terminaison de l'API
+
+```bash
+$ openstack endpoint create --region RegionOne \
+  compute public http://controller:8774/v2.1
+
+$ openstack endpoint create --region RegionOne \
+  compute internal http://controller:8774/v2.1
+
+$ openstack endpoint create --region RegionOne \
+  compute admin http://controller:8774/v2.1
+```
+
+#### 2.5.1.2) Installation et configuration du composant
+
+Installation des paquets :
+
+```bash
+# apt install nova-api nova-conductor \
+  nova-novncproxy nova-scheduler
+```
+
+Il faut éditer le fichier `/etc/nova/nova.conf` :
+
+* Dans les sections [api_database] et [database], on configure l'accès à la base de données :
+
+```conf
+[api_database]
+# ...
+connection = mysql+pymysql://nova:NOVA_DBPASS@controller/nova_api
+
+[database]
+# ...
+connection = mysql+pymysql://nova:NOVA_DBPASS@controller/nova
+```
+
+* Dans la section [DEFAULT], on configure la connexion à RabbitMQ
+
+```conf
+[DEFAULT]
+# ...
+transport_url = rabbit://openstack:RABBIT_PASS@controller
+```
+
+* Dans les sections [api] et [keystone_authtoken], on configure l'accès au service d'identité :
+
+```conf
+[api]
+# ...
+auth_strategy = keystone
+
+[keystone_authtoken]
+# ...
+auth_url = http://controller:5000/v3
+memcached_servers = controller:11211
+auth_type = password
+project_domain_name = Default
+user_domain_name = Default
+project_name = service
+username = nova
+password = NOVA_PASS
+```
+
+* A nouveau dans la section [DEFAULT], on indique l'IP de `controller` :
+
+```conf
+[DEFAULT]
+# ...
+my_ip = 10.10.10.10
+```
+
+* Toujous dans la section [DEFAULT], on active le suppot du réseau :
+
+```conf
+[DEFAULT]
+# ...
+use_neutron = true
+firewall_driver = nova.virt.firewall.NoopFirewallDriver
+```
+
+* Dans la section [neutron], on va configurer d'avance la connexion au service neutron qui n'est pas encore installé
+
+```conf
+[neutron]
+# ...
+url = http://controller:9696
+auth_url = http://controller:5000
+auth_type = password
+project_domain_name = default
+user_domain_name = default
+region_name = RegionOne
+project_name = service
+username = neutron
+password = NEUTRON_PASS
+service_metadata_proxy = true
+metadata_proxy_shared_secret = METADATA_SECRET
+```
+
+* Dans la section [vnc], on configure le proxy du vnc :
+
+```conf
+[vnc]
+enabled = true
+# ...
+server_listen = $my_ip
+server_proxyclient_address = $my_ip
+```
+
+* Dans la section [glance], on configure la connexion à l'api de glance :
+
+```conf
+[glance]
+# ...
+api_servers = http://controller:9292
+```
+
+* Dans la section [oslo_concurrency], on configure le lock_path :
+
+```conf
+[oslo_concurrency]
+# ...
+lock_path = /var/lib/nova/tmp
+```
+
+* De nouveau dans la section [DEFAULT]
+Comme indiqué dans la documentation officielle il faut retiré le `log_dir` du fichier de configuration.
+
+* Dans la section [placement], on configure l'accès au service Placement
+
+```conf
+[placement]
+# ...
+region_name = RegionOne
+project_domain_name = Default
+project_name = service
+auth_type = password
+user_domain_name = Default
+auth_url = http://controller:5000/v3
+username = placement
+password = PLACEMENT_PASS
+```
+
+Ensuite on initialise les bases de données :
+
+```bash
+# su -s /bin/sh -c "nova-manage api_db sync" nova
+# su -s /bin/sh -c "nova-manage cell_v2 map_cell0" nova
+# su -s /bin/sh -c "nova-manage cell_v2 create_cell --name=cell1 --verbose" nova
+# su -s /bin/sh -c "nova-manage db sync" nova
+# su -s /bin/sh -c "nova-manage cell_v2 list_cells" nova
+```
+
+##### 2.5.1.3) Finalisation de l'installation
+
+Pour terminer l'installation il faut redémarrer les services :
+
+```bash
+# service nova-api restart
+# service nova-scheduler restart
+# service nova-conductor restart
+# service nova-novncproxy restart
+```
+
+#### 2.5.1) Partie sur `compute` et `compute2`
+
+Cette partie doit être réalisée sur toutes les machines étant destinées au rôle compute.
+
+
