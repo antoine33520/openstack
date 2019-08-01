@@ -624,7 +624,7 @@ $ openstack service create --name nova \
   --description "OpenStack Compute" compute
 ```
 
-##### 2.5.1.1.3) création des points de terminaison de l'API
+##### 2.5.1.1.3) Création des points de terminaison de l'API
 
 ```bash
 $ openstack endpoint create --region RegionOne \
@@ -952,7 +952,234 @@ Found 2 unmapped computes in cell: f741e0b3-b740-45a4-823f-a9fbbb4e6e81
 ### 2.6) Installation de Neutron
 
 Neutron est le service qui s'occupe de la gestion de la partie réseau d'openstack.
-2 options sont disponibles pour la configuration réseau d'OpenStack, ici j'utiliserai la première, pour plus d'information rapportez-vous à la [documentattion officielle](https://docs.openstack.org/neutron/stein/install/overview.html).
 
 #### 2.6.1) Partie sur `controller`
 
+##### 2.6.1.1) Pré requis
+
+###### 2.6.1.1.1) Préparation de la base de données
+
+Il faut commencer par créer la base de données :
+
+```bash
+# mysql
+```
+
+```mysql
+MariaDB [(none)] CREATE DATABASE neutron;
+
+MariaDB [(none)]> GRANT ALL PRIVILEGES ON neutron.* TO 'neutron'@'localhost' \
+  IDENTIFIED BY 'NEUTRON_DBPASS';
+MariaDB [(none)]> GRANT ALL PRIVILEGES ON neutron.* TO 'neutron'@'%' \
+  IDENTIFIED BY 'NEUTRON_DBPASS';
+```
+
+##### 2.6.1.1.2) Création du compte pour le service
+
+Ensuite on se connect avec les droits administrateurs à l'aide du script.
+
+```bash
+$ . admin-openrc
+```
+
+```bash
+$ openstack user create --domain default --password-prompt neutron
+$ openstack role add --project service --user neutron admin
+$ openstack service create --name neutron \
+  --description "OpenStack Networking" network
+```
+
+##### 2.6.1.1.3) Création des points de terminaison de l'API
+
+```bash
+$ openstack endpoint create --region RegionOne \
+  network public http://controller:9696
+$ openstack endpoint create --region RegionOne \
+  network internal http://controller:9696
+$ openstack endpoint create --region RegionOne \
+  network admin http://controller:9696
+```
+
+##### 2.6.1.2) Configuration de l'option réseau
+
+Deux options sont disponibles pour la configuration réseau d'OpenStack, ici j'utiliserai la première, pour plus d'information rapportez-vous à la [documentattion officielle](https://docs.openstack.org/neutron/stein/install/overview.html).
+
+##### 2.6.1.2.1) Installation des composants
+
+```bash
+# apt install neutron-server neutron-plugin-ml2 \
+  neutron-linuxbridge-agent neutron-dhcp-agent \
+  neutron-metadata-agent
+```
+
+##### 2.6.1.2.2) Configuration du composant serveur
+
+Edition du fichier `/etc/neutron/neutron.conf` :
+
+* Dans la section [database], on configure la connexion à la base de données :
+
+```conf
+[database]
+# ...
+connection = mysql+pymysql://neutron:NEUTRON_DBPASS@controller/neutron
+```
+
+* Dans la section [DEFAULT], on active le plug-in ML2 et désactive les plug-ins additionnels :
+
+```conf
+[DEFAULT]
+# ...
+core_plugin = ml2
+service_plugins =
+```
+
+* De nouveau dans la section [DEFAULT], on configure l'accès à RabbitMQ :
+
+```conf
+[DEFAULT]
+# ...
+transport_url = rabbit://openstack:RABBIT_PASS@controller
+```
+
+* Dans les sections [DEFAULT] et [keystone_authtoken], on configure l'accès au service d'identité :
+
+```conf
+[DEFAULT]
+# ...
+auth_strategy = keystone
+
+[keystone_authtoken]
+# ...
+www_authenticate_uri = http://controller:5000
+auth_url = http://controller:5000
+memcached_servers = controller:11211
+auth_type = password
+project_domain_name = default
+user_domain_name = default
+project_name = service
+username = neutron
+password = NEUTRON_PASS
+```
+
+* Dans les sections [DEFAULT] et [nova], on configure la communication entre le service Nova et Neutron :
+
+```conf
+[DEFAULT]
+# ...
+notify_nova_on_port_status_changes = true
+notify_nova_on_port_data_changes = true
+
+[nova]
+# ...
+auth_url = http://controller:5000
+auth_type = password
+project_domain_name = default
+user_domain_name = default
+region_name = RegionOne
+project_name = service
+username = nova
+password = NOVA_PASS
+```
+
+* Dans la section [oslo_concurrency], on configure le lock_path :
+
+```conf
+[oslo_concurrency]
+# ...
+lock_path = /var/lib/neutron/tmp
+```
+
+##### 2.6.1.2.3) Configuration du plug-in ML2
+
+On édit le fichier `/etc/neutron/plugins/ml2/ml2_conf.ini` :
+
+* Dans la section [ml2], on configure les réseaux flat et VLAN :
+
+```conf
+[ml2]
+# ...
+type_drivers = flat,vlan
+```
+
+* Dans la section [ml2], on désactive les fonctionnalités réseau "self-service" :
+
+```conf
+[ml2]
+# ...
+tenant_network_types =
+```
+
+* Dans la section [ml2], on configure le pont réseau Linux :
+
+```conf
+[ml2]
+# ...
+mechanism_drivers = linuxbridge
+```
+
+* Dans la section [ml2], on configure l'extension du port de sécurité :
+
+```conf
+[ml2]
+# ...
+extension_drivers = port_security
+```
+
+* Dans la section [ml2_type_flat], on configure le réseau flat comme fournisseur de réseau virtuel :
+
+```conf
+[ml2_type_flat]
+# ...
+flat_networks = provider
+```
+
+* Dans la section [securitygroup], on active les groupes de sécurité :
+
+```conf
+[securitygroup]
+# ...
+enable_ipset = true
+```
+
+##### 2.6.1.2.4) Configuration de l'agent de pont Linux
+
+Edition du fichier `/etc/neutron/plugins/ml2/linuxbridge_agent.ini` :
+
+* Dans la section [linux_bridge], on relie l'interface reliée au réseau externe au fournisseur de réseau virtuel :
+
+```conf
+[linux_bridge]
+physical_interface_mappings = provider:ens19
+```
+
+ATTENTION: _Remplacez ens19 par l'interface correspondant dans votre configuration_
+
+* Dans la section [vxlan], on désactive la fonction vxlan de Neutron :
+
+```conf
+[vxlan]
+enable_vxlan = false
+```
+
+* Dans la section [securitygroup], on active les groupes de sécurité et le pare-feu du pont linux :
+
+```conf
+[securitygroup]
+# ...
+enable_security_group = true
+firewall_driver = neutron.agent.linux.iptables_firewall.IptablesFirewallDriver
+```
+
+##### 2.6.1.2.5) Configuration de l'agent DHCP
+
+Edition du fichier `/etc/neutron/dhcp_agent.ini` :
+
+* Dans la section [DEFAULT], on configure les différentes fonctions de l'agent DHCP :
+
+```conf
+[DEFAULT]
+# ...
+interface_driver = linuxbridge
+dhcp_driver = neutron.agent.linux.dhcp.Dnsmasq
+enable_isolated_metadata = true
+```
