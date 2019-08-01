@@ -974,7 +974,7 @@ MariaDB [(none)]> GRANT ALL PRIVILEGES ON neutron.* TO 'neutron'@'%' \
   IDENTIFIED BY 'NEUTRON_DBPASS';
 ```
 
-##### 2.6.1.1.2) Création du compte pour le service
+###### 2.6.1.1.2) Création du compte pour le service
 
 Ensuite on se connect avec les droits administrateurs à l'aide du script.
 
@@ -989,7 +989,7 @@ $ openstack service create --name neutron \
   --description "OpenStack Networking" network
 ```
 
-##### 2.6.1.1.3) Création des points de terminaison de l'API
+###### 2.6.1.1.3) Création des points de terminaison de l'API
 
 ```bash
 $ openstack endpoint create --region RegionOne \
@@ -1004,7 +1004,7 @@ $ openstack endpoint create --region RegionOne \
 
 Deux options sont disponibles pour la configuration réseau d'OpenStack, ici j'utiliserai la première, pour plus d'information rapportez-vous à la [documentattion officielle](https://docs.openstack.org/neutron/stein/install/overview.html).
 
-##### 2.6.1.2.1) Installation des composants
+###### 2.6.1.2.1) Installation des composants
 
 ```bash
 # apt install neutron-server neutron-plugin-ml2 \
@@ -1012,7 +1012,7 @@ Deux options sont disponibles pour la configuration réseau d'OpenStack, ici j'u
   neutron-metadata-agent
 ```
 
-##### 2.6.1.2.2) Configuration du composant serveur
+###### 2.6.1.2.2) Configuration du composant serveur
 
 Edition du fichier `/etc/neutron/neutron.conf` :
 
@@ -1089,7 +1089,7 @@ password = NOVA_PASS
 lock_path = /var/lib/neutron/tmp
 ```
 
-##### 2.6.1.2.3) Configuration du plug-in ML2
+###### 2.6.1.2.3) Configuration du plug-in ML2
 
 On édit le fichier `/etc/neutron/plugins/ml2/ml2_conf.ini` :
 
@@ -1141,7 +1141,7 @@ flat_networks = provider
 enable_ipset = true
 ```
 
-##### 2.6.1.2.4) Configuration de l'agent de pont Linux
+###### 2.6.1.2.4) Configuration de l'agent de pont Linux
 
 Edition du fichier `/etc/neutron/plugins/ml2/linuxbridge_agent.ini` :
 
@@ -1170,7 +1170,7 @@ enable_security_group = true
 firewall_driver = neutron.agent.linux.iptables_firewall.IptablesFirewallDriver
 ```
 
-##### 2.6.1.2.5) Configuration de l'agent DHCP
+###### 2.6.1.2.5) Configuration de l'agent DHCP
 
 Edition du fichier `/etc/neutron/dhcp_agent.ini` :
 
@@ -1182,4 +1182,125 @@ Edition du fichier `/etc/neutron/dhcp_agent.ini` :
 interface_driver = linuxbridge
 dhcp_driver = neutron.agent.linux.dhcp.Dnsmasq
 enable_isolated_metadata = true
+```
+
+###### 2.6.1.2.6) Configuration de l'agent de métadonnées
+
+Edition du fichier `/etc/neutron/metadata_agent.ini` :
+
+* Dans la section [DEFAULT], on configure le mot de passe de l'agent
+
+```conf
+[DEFAULT]
+# ...
+nova_metadata_host = controller
+metadata_proxy_shared_secret = METADATA_SECRET
+```
+
+#### 2.6.1.3) Finalisation de l'installation
+
+Initialisation de la base de données :
+
+```bash
+# su -s /bin/sh -c "neutron-db-manage --config-file /etc/neutron/neutron.conf \
+  --config-file /etc/neutron/plugins/ml2/ml2_conf.ini upgrade head" neutron
+```
+
+Redémarrage des différents services :
+
+```bash
+# service nova-api restart
+# service neutron-server restart
+# service neutron-linuxbridge-agent restart
+# service neutron-dhcp-agent restart
+# service neutron-metadata-agent restart
+```
+
+#### 2.6.2) Partie sur les noeuds `compute`
+
+##### 2.6.2.1) Installation du composant
+
+```bash
+# apt install neutron-linuxbridge-agent
+```
+
+##### 2.6.2.2) Configuration du composant
+
+Edition du fichier `/etc/neutron/neutron.conf` :
+
+* Dans la section [database], on désactive l'accès à la base de données :
+Les noeuds `compute` n'ont pas besoin d'avoir accès à la BDD donc il faut commenté tout ce qui se trouve dans cette section.
+
+* Dans la section [DEFAULT], on configure l'accès à RabbitMQ :
+
+```conf
+[DEFAULT]
+# ...
+transport_url = rabbit://openstack:RABBIT_PASS@controller
+```
+
+* Dans les sections [DEFAULT] et [keystone_authtoken], on configure la connexion au service d'identité
+
+```conf
+[DEFAULT]
+# ...
+auth_strategy = keystone
+
+[keystone_authtoken]
+# ...
+www_authenticate_uri = http://controller:5000
+auth_url = http://controller:5000
+memcached_servers = controller:11211
+auth_type = password
+project_domain_name = default
+user_domain_name = default
+project_name = service
+username = neutron
+password = NEUTRON_PASS
+```
+
+* Dans la section [oslo_concurrency], on configure le lock_path
+
+```conf
+[oslo_concurrency]
+# ...
+lock_path = /var/lib/neutron/tmp
+```
+
+##### 2.6.2.3) Configuration de l'agent du pont Linux
+
+Il faut éditer le fichier `/etc/neutron/plugins/ml2/linuxbridge_agent.ini` :
+
+* Dans la section [linux_bridge], on relie l'interface reliée au réseau externe au fournisseur de réseau virtuel :
+
+```conf
+[linux_bridge]
+physical_interface_mappings = provider:ens19
+```
+
+ATTENTION: _Remplacez ens19 par l'interface correspondant dans votre configuration_
+
+* Dans la section [vxlan], on désactive la fonction vxlan de Neutron :
+
+```conf
+[vxlan]
+enable_vxlan = false
+```
+
+* Dans la section [securitygroup], on active les groupes de sécurité et le pare-feu du pont linux :
+
+```conf
+[securitygroup]
+# ...
+enable_security_group = true
+firewall_driver = neutron.agent.linux.iptables_firewall.IptablesFirewallDriver
+```
+
+##### 2.6.2.4) Finalisation de l'installation
+
+Il faut redémarrer les services :
+
+```bash
+# service nova-compute restart
+# service neutron-linuxbridge-agent restart
 ```
