@@ -15,8 +15,6 @@ Cette installation va être réalisé sur 6 machines virtuelles. Une qui sera le
 |  `compute`   |  4  |  2   | 10.10.10.20 | 192.168.20.182 |    50    |          |          |
 |  `compute2`  |  4  |  2   | 10.10.10.22 | 192.168.20.183 |    50    |          |          |
 |  `storage1`  |  2  |  1   | 10.10.10.30 | 192.168.20.184 |    50    |   100    |          |
-|  `object1`   |  2  |  1   | 10.10.10.40 | 192.168.20.185 |    50    |    50    |    50    |
-|  `object2`   |  2  |  1   | 10.10.10.42 | 192.168.20.186 |    50    |    50    |    50    |
 
 ![Photo Topologie](./topo.svg)
 
@@ -1415,3 +1413,284 @@ WSGIApplicationGroup %{GLOBAL}
 ```bash
 # service apache2 reload
 ```
+
+### 2.8) Installation de Cinder
+
+#### 2.8.1) Partie sur `controller`
+
+##### 2.8.1.1) Pré requis
+
+Création de la base de données :
+
+```bash
+# mysql
+```
+
+Utilisation des droits admin :
+
+```bash
+$ . admin-openrc
+```
+
+Création des identifiants du service :
+
+* Création de l'utilisateur :
+
+```bash
+$ openstack user create --domain default --password-prompt cinder
+```
+
+* Ajout du rôle admin à l'utilisateur :
+
+```bash
+$ openstack role add --project service --user cinder admin
+```
+
+* Création des entités de service `cinderv2` et `conderv3` :
+
+```bash
+$ openstack service create --name cinderv2 \
+  --description "OpenStack Block Storage" volumev2
+
+$ openstack service create --name cinderv3 \
+  --description "OpenStack Block Storage" volumev3
+```
+
+* Création des points de terminaison de l'API :
+
+```bash
+$ openstack endpoint create --region RegionOne \
+  volumev2 public http://controller:8776/v2/%\(project_id\)s
+
+$ openstack endpoint create --region RegionOne \
+  volumev2 internal http://controller:8776/v2/%\(project_id\)s
+
+$ openstack endpoint create --region RegionOne \
+  volumev2 admin http://controller:8776/v2/%\(project_id\)s
+```
+
+```bash
+$ openstack endpoint create --region RegionOne \
+  volumev3 public http://controller:8776/v3/%\(project_id\)s
+
+$ openstack endpoint create --region RegionOne \
+  volumev3 internal http://controller:8776/v3/%\(project_id\)s
+
+$ openstack endpoint create --region RegionOne \
+  volumev3 admin http://controller:8776/v3/%\(project_id\)s
+```
+
+##### 2.8.1.2) Installation et configuration des composants
+
+Installation des composants :
+
+```bash
+# apt install cinder-api cinder-scheduler
+```
+
+Edition du fichier `/etc/cinder/cinder.conf` :
+
+* Dans la section [database], on configure l'accès à la BDD :
+
+```conf
+[database]
+# ...
+connection = mysql+pymysql://cinder:CINDER_DBPASS@controller/cinder
+```
+
+* Dans la section [DEFAULT], on configure l'accès à RabbitMQ :
+
+```conf
+[DEFAULT]
+# ...
+transport_url = rabbit://openstack:RABBIT_PASS@controller
+```
+
+* Dans les section [DEFAULT] et [keystone_authtoken], on configure l'accès au service d'identité :
+
+```conf
+[DEFAULT]
+# ...
+auth_strategy = keystone
+
+[keystone_authtoken]
+# ...
+www_authenticate_uri = http://controller:5000
+auth_url = http://controller:5000
+memcached_servers = controller:11211
+auth_type = password
+project_domain_name = default
+user_domain_name = default
+project_name = service
+username = cinder
+password = CINDER_PASS
+```
+
+* Dans la section [DEFAULT], on indique l'ip de `controller` :
+
+```conf
+[DEFAULT]
+# ...
+my_ip = 10.0.0.11
+```
+
+* Dans la section [oslo_concurrency], on configure le lock_path :
+
+```conf
+[oslo_concurrency]
+# ...
+lock_path = /var/lib/cinder/tmp
+```
+
+Initialisation de la base de données :
+
+```bash
+# su -s /bin/sh -c "cinder-manage db sync" cinder
+```
+
+##### 2.8.1.3) Configuration de Compute pour l'utilisation de Cinder
+
+Edition du fichier `/etc/nova/nova.conf` :
+
+```conf
+[cinder]
+os_region_name = RegionOne
+```
+
+##### 2.8.1.4) Finalisation de l'installation
+
+Redémarrage des services :
+
+```bash
+# service nova-api restart
+# service cinder-scheduler restart
+# service apache2 restart
+```
+
+#### 2.8.2) Partie sur `storage1`
+
+##### 2.8.2.1) Pré requis
+
+Installation des utilitaires :
+
+```bash
+# apt install lvm2 thin-provisioning-tools
+```
+
+Création du volume physique `/dev/sdb` :
+
+```bash
+# pvcreate /dev/sdb
+
+Physical volume "/dev/sdb" successfully created.
+```
+
+Création du groupe de volume `cinder-volumes` :
+
+```bash
+# vgcreate cinder-volumes /dev/sdb
+
+Volume group "cinder-volumes" successfully created
+```
+
+##### 2.8.2.2) Installation et configuration du composant
+
+Installation du paquet :
+
+```bash
+# apt install cinder-volume
+```
+
+Edition du fichier `/etc/cinder/cinder.conf` :
+
+* Dans la section [database], on configure l'accès à la base de données :
+
+```conf
+[database]
+# ...
+connection = mysql+pymysql://cinder:CINDER_DBPASS@controller/cinder
+```
+
+* Dans la section [DEFAULT], on configure l'accès à RabbitMQ :
+
+```conf
+[DEFAULT]
+# ...
+transport_url = rabbit://openstack:RABBIT_PASS@controller
+```
+
+* Dans les section [DEFAULT] et [keystone_authtoken], on configure l'accès au service d'identité :
+
+```conf
+[DEFAULT]
+# ...
+auth_strategy = keystone
+
+[keystone_authtoken]
+# ...
+www_authenticate_uri = http://controller:5000
+auth_url = http://controller:5000
+memcached_servers = controller:11211
+auth_type = password
+project_domain_name = default
+user_domain_name = default
+project_name = service
+username = cinder
+password = CINDER_PASS
+```
+
+* Dans la section [DEFAULT], on configure l'ip relié au réseau d'OpenStack :
+
+```conf
+[DEFAULT]
+# ...
+my_ip = MANAGEMENT_INTERFACE_IP_ADDRESS
+```
+
+* Dans la section [lvm], on configure le stockage :
+
+```conf
+[lvm]
+# ...
+volume_driver = cinder.volume.drivers.lvm.LVMVolumeDriver
+volume_group = cinder-volumes
+target_protocol = iscsi
+target_helper = tgtadm
+```
+
+* Dans la section [DEFAULT], on active le stockage LVM :
+
+```conf
+[DEFAULT]
+# ...
+enabled_backends = lvm
+```
+
+* Dans la section [DEFAULT] à nouveau, on configure l'accès au service d'image :
+
+```conf
+[DEFAULT]
+# ...
+glance_api_servers = http://controller:9292
+```
+
+* Dans la section [oslo_concurrency], on configure le lock_path :
+
+```conf
+[oslo_concurrency]
+# ...
+lock_path = /var/lib/cinder/tmp
+```
+
+##### 2.8.2.3) Finalisation de l'installation
+
+redémarrage des services :
+
+```bash
+# service tgt restart
+# service cinder-volume restart
+```
+
+## 3) Fin de l'installation
+
+Maintenant l'installation d'OpenStack est terminée.
