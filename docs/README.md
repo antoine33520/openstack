@@ -5,6 +5,8 @@ Cette page constitue donc la documentation à réaliser.
 
 _Toute la documentation a été réalisé avec les droit `root`, toutes les commandes commençant `#` doivent être exécutées soit en utilisant la commande `sudo` (`man sudo` pour plus d'explication) soit depuis l'utilisateur `root`(méthode à éviter pour raison de sécurité)._
 
+Déploiement "All In One" d'OpenStack avec Ansible [ici](./openstack-ansible-aio.md).
+
 ## 1) Topologie
 
 Cette installation va être réalisé sur 6 machines virtuelles. Une qui sera le controlleur, deux pour l'execution des instances, une pour le stockage de block et deux autre pour le stockage d'objets.
