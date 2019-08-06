@@ -928,9 +928,9 @@ Il faut ensuite redémarrer le service :
 service nova-compute restart
 ```
 
-#### 2.5.3) A nouveau `controller`
+#### 2.5.3) A nouveau sur `controller`
 
-#### 2.5.3.1) Ajout des `compute`
+##### 2.5.3.1) Ajout des `compute`
 
 Il faut maintenant ajouter les machines dans la base de données :
 
@@ -1278,7 +1278,7 @@ Il faut éditer le fichier `/etc/neutron/plugins/ml2/linuxbridge_agent.ini` :
 physical_interface_mappings = provider:ens19
 ```
 
-ATTENTION: _Remplacez ens19 par l'interface correspondant dans votre configuration_
+_Remplacez ens19 par l'interface correspondant dans votre configuration_
 
 * Dans la section [vxlan], on désactive la fonction vxlan de Neutron :
 
@@ -1303,4 +1303,115 @@ Il faut redémarrer les services :
 ```bash
 # service nova-compute restart
 # service neutron-linuxbridge-agent restart
+```
+
+### 2.7) Installation de Horizon sur `controller`
+
+#### 2.7.1) Installation et configuration du composant
+
+Installation des paquets :
+
+```bash
+# apt install openstack-dashboard
+```
+
+Ensuite édition du script python `/etc/openstack-dashboard/local_settings.py` :
+
+* Configuration du Dashboard pour utiliser les services OpenStack de `controller` :
+
+```python
+OPENSTACK_HOST = "controller"
+```
+
+* Configuration des hôtes autorisés à se connecter au Dashboard :
+
+```python
+ALLOWED_HOSTS = ['one.example.com', 'two.example.com']
+```
+
+__Remarque :__ [*] permet d'autorisé tous les hôtes.\
+**ATTENTION :** la configuration doit être faite dans la section de configuration du Dashboard et non d'Ubuntu !
+
+* Configuration du stockage `memcached` :
+
+```python
+SESSION_ENGINE = 'django.contrib.sessions.backends.cache'
+
+CACHES = {
+    'default': {
+         'BACKEND': 'django.core.cache.backends.memcached.MemcachedCache',
+         'LOCATION': 'controller:11211',
+    }
+}
+```
+
+__Remarque :__ Il faut commenter les autres configuration de session de stockage
+
+* Activation de l'API d'identité version 3 :
+
+```python
+OPENSTACK_KEYSTONE_URL = "http://%s:5000/v3" % OPENSTACK_HOST
+```
+
+* Activation du support multi-domaines :
+
+```python
+OPENSTACK_KEYSTONE_MULTIDOMAIN_SUPPORT = True
+```
+
+* Configuration des versions des API
+
+```python
+OPENSTACK_API_VERSIONS = {
+    "identity": 3,
+    "image": 2,
+    "volume": 3,
+}
+```
+
+* Configuration du domaine par défaut :
+
+```python
+OPENSTACK_KEYSTONE_DEFAULT_DOMAIN = "Default"
+```
+
+* Configuration du rôle par défaut pour les utilisateur créés depuis le Dashboard :
+
+```python
+OPENSTACK_KEYSTONE_DEFAULT_ROLE = "user"
+```
+
+* Si l'option 1 a été choisi à l'installation de Neutron il faut désactiver certains services :
+
+```python
+OPENSTACK_NEUTRON_NETWORK = {
+    ...
+    'enable_router': False,
+    'enable_quotas': False,
+    'enable_ipv6': False,
+    'enable_distributed_router': False,
+    'enable_ha_router': False,
+    'enable_lb': False,
+    'enable_firewall': False,
+    'enable_vpn': False,
+    'enable_fip_topology_check': False,
+}
+```
+
+* Changement de la TIME ZONE :
+
+```python
+TIME_ZONE = "Europe/Paris"
+```
+
+Ensuite il faut ajouter une ligne dans le fichier `/etc/apache2/conf-available/openstack-dashboard.conf` si elle n'est pas déjà présente :
+
+```conf
+WSGIApplicationGroup %{GLOBAL}
+```
+
+#### 2.7.2) Finalisation de l'installation
+
+```bash
+# service apache2 reload
 ```
