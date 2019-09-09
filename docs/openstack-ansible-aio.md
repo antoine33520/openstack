@@ -1,5 +1,7 @@
 # Déploiement "All In One" d'OpenStack avec Ansible
 
+Déploiement en utilisant Kolla [ici](./kolla.md).
+
 Le déploiement "All In One" permet d'effectuer une installation d'OpenStack sur une seule machine physique ou virtuelle. Ceci est réalisable en créant des conteneur LXC qui hébergeront les defférents services d'OpenStack.
 
 _Toute cette documentation a été réalisée avec l'utilisateur `root` ce qui est vivement déconseillé pour des raisons de sécurité_\

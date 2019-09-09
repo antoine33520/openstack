@@ -7,6 +7,8 @@ _Toute la documentation a été réalisé avec les droit `root`, toutes les comm
 
 Déploiement "All In One" d'OpenStack avec Ansible [ici](./openstack-ansible-aio.md).
 
+Déploiement "All In One" d'OpenStack avec Ansible et Kolla sur des conteneurs Docker [ici](./kolla.md)
+
 ## 1) Topologie
 
 Cette installation va être réalisé sur 6 machines virtuelles. Une qui sera le controlleur, deux pour l'execution des instances, une pour le stockage de block et deux autre pour le stockage d'objets.
